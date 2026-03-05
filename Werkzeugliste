@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoltTrack Cloud | Management</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; color: #1e293b; }
+        .chart-container { position: relative; width: 100%; max-width: 600px; margin: auto; height: 250px; }
+        .modal-active { display: flex !important; }
+        .loading-overlay { position: fixed; inset: 0; bg-white/80; z-index: 100; display: flex; items-center; justify-center; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- Ladebildschirm -->
+    <div id="loader" class="fixed inset-0 bg-slate-50 z-[100] flex flex-col items-center justify-center transition-opacity duration-500">
+        <div class="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p class="text-slate-500 font-medium animate-pulse">Cloud-Daten werden synchronisiert...</p>
+    </div>
+
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="bg-blue-600 text-white p-2 rounded-lg font-black">VT</div>
+                <h1 class="text-xl font-bold text-slate-800 tracking-tight">VoltTrack <span class="text-blue-600 italic">Cloud</span></h1>
+            </div>
+            <button onclick="openModal()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 shadow-sm transition-all text-sm">
+                <span>+</span> Gerät hinzufügen
+            </button>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full space-y-8">
+        
+        <!-- KPI Row -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                <p class="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Inventar Gesamt</p>
+                <div class="text-3xl font-black mt-1" id="kpi-total">0</div>
+            </div>
+            <div class="bg-rose-50 p-5 rounded-2xl border border-rose-200 shadow-sm">
+                <p class="text-rose-400 text-[10px] font-bold uppercase tracking-widest">Kritisch (Fällig)</p>
+                <div class="text-3xl font-black text-rose-600 mt-1" id="kpi-overdue">0</div>
+            </div>
+            <div class="bg-amber-50 p-5 rounded-2xl border border-amber-200 shadow-sm">
+                <p class="text-amber-500 text-[10px] font-bold uppercase tracking-widest">Warnung (Bald)</p>
+                <div class="text-3xl font-black text-amber-600 mt-1" id="kpi-soon">0</div>
+            </div>
+            <div class="bg-emerald-50 p-5 rounded-2xl border border-emerald-200 shadow-sm">
+                <p class="text-emerald-500 text-[10px] font-bold uppercase tracking-widest">Sicher (OK)</p>
+                <div class="text-3xl font-black text-emerald-600 mt-1" id="kpi-ok">0</div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Tabelle -->
+            <div class="lg:col-span-2 space-y-4">
+                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div class="p-4 border-b border-slate-100 flex flex-wrap gap-3 items-center justify-between bg-slate-50/30">
+                        <input type="text" id="search-input" placeholder="Suchen..." class="px-4 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 w-full md:w-64">
+                        <div class="flex items-center gap-2 text-xs text-slate-400 font-medium">
+                            <span class="inline-block w-2 h-2 rounded-full bg-emerald-500"></span> Live-Verbindung aktiv
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-slate-50 text-slate-400 text-[10px] uppercase tracking-widest font-bold">
+                                    <th class="px-6 py-4">Gerät / ID</th>
+                                    <th class="px-6 py-4">Monteur</th>
+                                    <th class="px-6 py-4">Nächster E-Check</th>
+                                    <th class="px-6 py-4 text-right">Aktionen</th>
+                                </tr>
+                            </thead>
+                            <tbody id="inventory-tbody" class="text-sm divide-y divide-slate-100">
+                                <!-- Daten kommen aus der Cloud -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts -->
+            <aside class="space-y-6">
+                <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                    <h3 class="text-xs font-bold text-slate-400 mb-4 uppercase tracking-widest">Status-Mix</h3>
+                    <div class="chart-container"><canvas id="statusChart"></canvas></div>
+                </div>
+                <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                    <h3 class="text-xs font-bold text-slate-400 mb-4 uppercase tracking-widest">Geräte pro Monteur</h3>
+                    <div class="chart-container"><canvas id="techChart"></canvas></div>
+                </div>
+            </aside>
+        </div>
+    </main>
+
+    <!-- Modal -->
+    <div id="tool-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div class="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                <h3 id="modal-title" class="text-lg font-bold text-slate-800">Gerät bearbeiten</h3>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600 text-2xl font-bold">&times;</button>
+            </div>
+            <form id="tool-form" class="p-6 space-y-4">
+                <input type="hidden" id="edit-id" value="">
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Inventar-ID</label>
+                    <input type="text" id="tool-id" required class="w-full px-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Bezeichnung</label>
+                    <input type="text" id="tool-name" required class="w-full px-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Monteur</label>
+                    <input type="text" id="tool-tech" required class="w-full px-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Letzte Prüfung</label>
+                    <input type="date" id="tool-last-date" required class="w-full px-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div class="flex gap-3 pt-4">
+                    <button type="button" onclick="closeModal()" class="flex-1 bg-slate-100 py-3 rounded-xl font-bold text-slate-600">Abbrechen</button>
+                    <button type="submit" class="flex-1 bg-blue-600 py-3 rounded-xl font-bold text-white shadow-lg shadow-blue-200">Speichern</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, deleteDoc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Globale Konfiguration
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        let inventory = [];
+        let state = { search: '', charts: { status: null, tech: null } };
+
+        // 1. Auth & Initialisierung
+        async function startApp() {
+            try {
+                await signInAnonymously(auth);
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        setupRealtimeSync();
+                        initCharts();
+                    }
+                });
+            } catch (err) {
+                console.error("Auth-Fehler", err);
+                document.getElementById('loader').innerHTML = "<p class='text-rose-500'>Fehler bei der Cloud-Verbindung.</p>";
+            }
+        }
+
+        // 2. Echtzeit-Synchronisation (Regel 1 & 2)
+        function setupRealtimeSync() {
+            const path = collection(db, 'artifacts', appId, 'public', 'data', 'inventory');
+            onSnapshot(path, (snapshot) => {
+                inventory = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                render();
+                document.getElementById('loader').style.opacity = '0';
+                setTimeout(() => document.getElementById('loader').classList.add('hidden'), 500);
+            }, (error) => {
+                console.error("Sync-Fehler", error);
+            });
+        }
+
+        // 3. Logik & Berechnung
+        function calculateStatus(lastCheck) {
+            const next = new Date(lastCheck);
+            next.setFullYear(next.getFullYear() + 1);
+            const diff = Math.ceil((next - new Date()) / (1000 * 60 * 60 * 24));
+            return {
+                str: next.toLocaleDateString('de-DE'),
+                type: diff < 0 ? 'overdue' : (diff <= 30 ? 'soon' : 'ok')
+            };
+        }
+
+        // 4. Rendering
+        function render() {
+            const filtered = inventory.filter(item => 
+                item.name.toLowerCase().includes(state.search.toLowerCase()) || 
+                item.toolId.toLowerCase().includes(state.search.toLowerCase())
+            );
+
+            const tbody = document.getElementById('inventory-tbody');
+            tbody.innerHTML = filtered.map(item => {
+                const check = calculateStatus(item.lastCheck);
+                const badge = check.type === 'overdue' ? 'bg-rose-100 text-rose-700' : (check.type === 'soon' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700');
+                return `
+                    <tr class="hover:bg-slate-50 transition-colors">
+                        <td class="px-6 py-4">
+                            <div class="font-bold text-slate-800">${item.name}</div>
+                            <div class="text-[9px] text-slate-400 font-mono uppercase">${item.toolId}</div>
+                        </td>
+                        <td class="px-6 py-4 text-slate-600">${item.tech}</td>
+                        <td class="px-6 py-4">
+                            <div class="${check.type === 'overdue' ? 'text-rose-600 font-bold' : 'text-slate-500'}">${check.str}</div>
+                            <span class="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${badge}">${check.type}</span>
+                        </td>
+                        <td class="px-6 py-4 text-right">
+                            <button onclick="window.editTool('${item.id}')" class="p-2 text-blue-600 hover:bg-blue-50 rounded-lg">✎</button>
+                            <button onclick="window.deleteTool('${item.id}')" class="p-2 text-rose-600 hover:bg-rose-50 rounded-lg">🗑</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            // KPIs
+            const stats = { overdue: 0, soon: 0, ok: 0 };
+            inventory.forEach(i => stats[calculateStatus(i.lastCheck).type]++);
+            document.getElementById('kpi-total').textContent = inventory.length;
+            document.getElementById('kpi-overdue').textContent = stats.overdue;
+            document.getElementById('kpi-soon').textContent = stats.soon;
+            document.getElementById('kpi-ok').textContent = stats.ok;
+
+            updateCharts(inventory, stats);
+        }
+
+        // 5. CRUD Operationen
+        window.saveTool = async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('edit-id').value;
+            const data = {
+                toolId: document.getElementById('tool-id').value,
+                name: document.getElementById('tool-name').value,
+                tech: document.getElementById('tool-tech').value,
+                lastCheck: document.getElementById('tool-last-date').value
+            };
+
+            const path = collection(db, 'artifacts', appId, 'public', 'data', 'inventory');
+            if (id) {
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id), data);
+            } else {
+                await addDoc(path, data);
+            }
+            window.closeModal();
+        };
+
+        window.deleteTool = async (id) => {
+            if (confirm("Gerät dauerhaft aus der Cloud löschen?")) {
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id));
+            }
+        };
+
+        // UI Helpers
+        window.openModal = (id = null) => {
+            const modal = document.getElementById('tool-modal');
+            const form = document.getElementById('tool-form');
+            form.reset();
+            document.getElementById('edit-id').value = id || '';
+            if (id) {
+                const item = inventory.find(i => i.id === id);
+                document.getElementById('tool-id').value = item.toolId;
+                document.getElementById('tool-name').value = item.name;
+                document.getElementById('tool-tech').value = item.tech;
+                document.getElementById('tool-last-date').value = item.lastCheck;
+                document.getElementById('modal-title').textContent = "Gerät bearbeiten";
+            } else {
+                document.getElementById('modal-title').textContent = "Neues Gerät";
+            }
+            modal.classList.add('modal-active');
+        };
+        window.closeModal = () => document.getElementById('tool-modal').classList.remove('modal-active');
+        document.getElementById('tool-form').onsubmit = window.saveTool;
+        document.getElementById('search-input').oninput = (e) => { state.search = e.target.value; render(); };
+
+        // 6. Charts
+        function initCharts() {
+            state.charts.status = new Chart(document.getElementById('statusChart'), {
+                type: 'doughnut',
+                data: { labels: ['Kritisch', 'Warnung', 'Sicher'], datasets: [{ data: [0, 0, 0], backgroundColor: ['#f43f5e', '#f59e0b', '#10b981'], borderWidth: 0 }] },
+                options: { responsive: true, maintainAspectRatio: false, cutout: '80%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 8, font: { size: 10 } } } } }
+            });
+            state.charts.tech = new Chart(document.getElementById('techChart'), {
+                type: 'bar',
+                data: { labels: [], datasets: [{ data: [], backgroundColor: '#3b82f6', borderRadius: 4 }] },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } }, x: { grid: { display: false } } }, plugins: { legend: { display: false } } }
+            });
+        }
+
+        function updateCharts(data, stats) {
+            state.charts.status.data.datasets[0].data = [stats.overdue, stats.soon, stats.ok];
+            state.charts.status.update();
+
+            const tMap = {};
+            data.forEach(d => tMap[d.tech] = (tMap[d.tech] || 0) + 1);
+            state.charts.tech.data.labels = Object.keys(tMap);
+            state.charts.tech.data.datasets[0].data = Object.values(tMap);
+            state.charts.tech.update();
+        }
+
+        startApp();
+    </script>
+</body>
+</html>
